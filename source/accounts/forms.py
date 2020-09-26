@@ -1,81 +1,110 @@
-from django.contrib.auth.forms import UserCreationForm
-from django.contrib.auth.models import AbstractUser
-from django.core.exceptions import ValidationError
-from django.urls import reverse
-from django.conf import settings
+from django.contrib.auth.models import User
 from django import forms
-from django.contrib.auth import get_user_model
-
-from .models import AuthToken, Profile, TOKEN_TYPE_PASSWORD_RESET
+from django.core.exceptions import ValidationError
 
 
-class MyUserCreationForm(UserCreationForm):
-    class Meta(UserCreationForm.Meta):
-        fields = ['username', 'password1', 'password2',
-                  'first_name', 'last_name', 'email']
+from django import forms
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 
-    def save(self, commit=True):
-        if settings.ACTIVATE_USERS_EMAIL:
-            user: AbstractUser = super().save(commit=False)
-            user.is_active = False
-            if commit:
-                user.save()
-                token = self.create_token(user)
-                self.send_email(user, token)
-        else:
-            user = super().save(commit=commit)
-            Profile.objects.create(user=user)
-        return user
+from accounts.models import Profile
 
-    # def save(self, commit=True):
-    #     user = super().save(commit=commit)
-    #     Profile.objects.create(user=user)
-    #     return user
 
-    def create_token(self, user):
-        return AuthToken.objects.create(user=user)
+class UserCreationForm(forms.Form):
+    username = forms.CharField(max_length=100, label='Username', required=True)
+    password = forms.CharField(max_length=100, label='Password', required=True,
+                               widget=forms.PasswordInput)
+    password_confirm = forms.CharField(max_length=100, label='Password Confirm', required=True,
+                                       widget=forms.PasswordInput)
+    email = forms.EmailField(label='Email', required=True)
 
-    def send_email(self, user, token):
-        if user.email:
-            subject = 'Вы создали учётную запись на сайте "Мой Блог"'
-            link = settings.BASE_HOST + reverse('accounts:activate', kwargs={'token': token.token})
-            message = f'''Здравствуйте, {user.username}!
-Вы создали учётную запись на сайте "Мой Блог"
-Активируйте её, перейдя по ссылке {link}.
-Если вы считаете, что это ошибка, просто игнорируйте это письмо.'''
-            html_message = f'''Здравствуйте, {user.username}!
-Вы создали учётную запись на сайте "Мой Блог"
-Активируйте её, перейдя по ссылке <a href="{link}">{link}</a>.
-Если вы считаете, что это ошибка, просто игнорируйте это письмо.'''
-            try:
-                user.email_user(subject, message, html_message=html_message)
-            except Exception as e:
-                print(e)
+    first_name = forms.CharField(max_length=100, label='first_name', required=False,)
+    last_name = forms.CharField(max_length=100, label='last_name', required=False,)
+
+    def clean_email(self):
+        email = self.cleaned_data.get('email')
+        try:
+            User.objects.get(email=email)
+            raise ValidationError('User with this email already exists',
+                                  code='user_email_exists')
+        except User.DoesNotExist:
+            return email
+
+    def clean_username(self):
+        username = self.cleaned_data.get('username')
+        try:
+            User.objects.get(username=username)
+            raise ValidationError('User with this username already exists',
+                                  code='user_username_exists')
+        except User.DoesNotExist:
+            return username
+
+    def clean(self):
+        super().clean()
+        password_1 = self.cleaned_data['password']
+        password_2 = self.cleaned_data['password_confirm']
+        first_name = self.cleaned_data['first_name']
+        last_name = self.cleaned_data['last_name']
+        if password_1 != password_2:
+            raise ValidationError('Passwords do not match',
+                                  code='passwords_do_not_match')
+        elif first_name == '' and last_name == '':
+            raise ValidationError('You should to write first or last name',
+                            code='user_name')
+        # elif first_name != '':
+        #     return first_name
+        # elif last_name != '':
+        #     return last_name
+
+        return self.cleaned_data
 
 
 class UserChangeForm(forms.ModelForm):
+    avatar = forms.ImageField(label='Аватар', required=False)
+    about = forms.CharField(label='О себе', required=False)
+    github_profile = forms.URLField(label='Профиль GitHub', required=False)
+
+    def get_initial_for_field(self, field, field_name):
+        if field_name in self.Meta.profile_fields:
+            return getattr(self.instance.profile, field_name)
+        return super().get_initial_for_field(field, field_name)
+
+    def save(self, commit=True):
+        user = super().save(commit=commit)
+        self.save_profile(commit)
+        return user
+
+    def save_profile(self, commit=True):
+        profile, _ = Profile.objects.get_or_create(user=self.instance)
+        for field in self.Meta.profile_fields:
+            setattr(profile, field, self.cleaned_data.get(field))
+        if commit:
+            profile.save()
+
+    def clean_github_profile(self):
+        github_profile = self.cleaned_data.get('github_profile')
+        if 'https://github.com/' not in github_profile:
+            raise ValidationError('Invalid url.', code='invalid_url')
+        return github_profile
+
+
     class Meta:
-        model = get_user_model()
-        fields = ['first_name', 'last_name', 'email']
-        labels = {'first_name': 'Имя', 'last_name': 'Фамилия', 'email': 'Email'}
+        model = User
+        fields = ['first_name', 'last_name', 'email', 'avatar', 'about', 'github_profile']
+        profile_fields = ['avatar', 'about', 'github_profile']
 
 
-class ProfileChangeForm(forms.ModelForm):
-    class Meta:
-        model = Profile
-        exclude = ['user']
+class UserChangePasswordForm(forms.ModelForm):
+    password = forms.CharField(max_length=100, required=True, label='New Password', widget=forms.PasswordInput)
+    password_confirm = forms.CharField(max_length=100, required=True, label='New Password confirm', widget=forms.PasswordInput)
+    old_password = forms.CharField(max_length=100, required=True, label='Old Password', widget=forms.PasswordInput)
 
-
-class SetPasswordForm(forms.ModelForm):
-    password = forms.CharField(label="Новый пароль", strip=False, widget=forms.PasswordInput)
-    password_confirm = forms.CharField(label="Подтвердите пароль", widget=forms.PasswordInput, strip=False)
-
-    def clean_password_confirm(self):
-        password = self.cleaned_data.get("password")
-        password_confirm = self.cleaned_data.get("password_confirm")
-        if password and password_confirm and password != password_confirm:
-            raise forms.ValidationError('Пароли не совпадают!')
-        return password_confirm
+    def clean_old_password(self):
+        old_password = self.cleaned_data.get('old_password')
+        user = self.instance
+        if not user.check_password(old_password):
+            raise ValidationError('Invalid password.', code='invalid_password')
+        return old_password
 
     def save(self, commit=True):
         user = self.instance
@@ -84,52 +113,14 @@ class SetPasswordForm(forms.ModelForm):
             user.save()
         return user
 
-    class Meta:
-        model = get_user_model()
-        fields = ['password', 'password_confirm']
-
-
-class PasswordChangeForm(SetPasswordForm):
-    old_password = forms.CharField(label="Старый пароль", strip=False, widget=forms.PasswordInput)
-
-    def clean_old_password(self):
-        old_password = self.cleaned_data.get('old_password')
-        if not self.instance.check_password(old_password):
-            raise forms.ValidationError('Старый пароль неправильный!')
-        return old_password
+    def clean(self):
+        super().clean()
+        password_1 = self.cleaned_data['password']
+        password_2 = self.cleaned_data['password_confirm']
+        if password_1 != password_2:
+            raise ValidationError('Passwords do not match', code='passwords_do_not_match')
+        return self.cleaned_data
 
     class Meta:
-        model = get_user_model()
+        model = User
         fields = ['password', 'password_confirm', 'old_password']
-
-
-class PasswordResetEmailForm(forms.Form):
-    email = forms.EmailField(required=True, label='Email')
-
-    def clean_email(self):
-        email = self.cleaned_data.get('email')
-        User = get_user_model()
-        if User.objects.filter(email=email).count() == 0:
-            raise ValidationError('Пользователь с таким email-ом не зарегистрирован')
-        return email
-
-    def send_email(self):
-        User = get_user_model()
-        email = self.cleaned_data.get('email')
-        user = User.objects.filter(email=email).first()
-        token = AuthToken.objects.create(user=user, life_days=3, type=TOKEN_TYPE_PASSWORD_RESET)
-
-        subject = 'Вы запросили восстановление пароля для учётной записи на сайте "Мой Блог"'
-        link = settings.BASE_HOST + reverse('accounts:password_reset', kwargs={'token': token.token})
-        message = f'''Ваша ссылка для восстановления пароля: {link}.
-Если вы считаете, что это ошибка, просто игнорируйте это письмо.'''
-        html_message = f'''Ваша ссылка для восстановления пароля: <a href="{link}">{link}</a>.
-Если вы считаете, что это ошибка, просто игнорируйте это письмо.'''
-        try:
-            user.email_user(subject, message, html_message=html_message)
-        except Exception as e:
-            print(e)
-
-
-class PasswordResetForm(SetPasswordForm):
-    pass

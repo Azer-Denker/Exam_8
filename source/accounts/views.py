@@ -1,166 +1,103 @@
-from django.contrib.auth import get_user_model, login, update_session_auth_hash
+from django.contrib.auth import login
+from django.contrib.auth.mixins import UserPassesTestMixin
 from django.contrib.auth.models import User
-from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.contrib.auth.views import LoginView
-from django.http import HttpResponseRedirect, Http404
-from django.shortcuts import redirect
-from django.urls import reverse, reverse_lazy
-from django.views.generic import View, FormView, DetailView, CreateView, UpdateView
-from django.conf import settings
+from django.http import HttpResponseRedirect
+from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.views.generic import DetailView, UpdateView, ListView
 
-from accounts.forms import MyUserCreationForm, UserChangeForm, ProfileChangeForm, \
-    PasswordChangeForm, PasswordResetEmailForm, PasswordResetForm
-from .models import AuthToken, Profile
+from accounts.models import Token, Profile
+from main.settings import HOST_NAME
+from .forms import UserCreationForm, UserChangeForm, UserChangePasswordForm
 
 
-class RegisterView(CreateView):
-    model = User
-    template_name = 'user_create.html'
-    form_class = MyUserCreationForm
+def register_view(request):
+    if request.method == 'GET':
+        form = UserCreationForm()
+        return render(request, 'user_create.html', {'form': form})
+    elif request.method == 'POST':
+        form = UserCreationForm(data=request.POST)
+        if form.is_valid():
+            user = User(
+                username=form.cleaned_data['username'],
+                email=form.cleaned_data['email'],
+                first_name=form.cleaned_data['first_name'],
+                last_name=form.cleaned_data['last_name'],
+                is_active=False
+            )
+            user.set_password(form.cleaned_data['password'])
+            user.save()
+            Profile.objects.create(user=user)
 
-    def form_valid(self, form):
-        user = form.save()
-        if settings.ACTIVATE_USERS_EMAIL:
-            return redirect('webapp:index')
+            token = Token.objects.create(user=user)
+            activation_url = HOST_NAME + reverse('accounts:user_activate') + '?token={}'.format(token)
+
+            user.email_user('Регистрация на сайте localhost',
+                            'Для активации перейдите по ссылке: {}'.format(activation_url))
+
+            return redirect("webapp:index")
         else:
-            login(self.request, user)
-            return redirect(self.get_success_url())
-
-    def get_success_url(self):
-        next_url = self.request.GET.get('next')
-        if not next_url:
-            next_url = self.request.POST.get('next')
-        if not next_url:
-            next_url = reverse('webapp:index')
-        return next_url
+            return render(request, 'user_create.html', {'form': form})
 
 
-class RegisterActivateView(View):
-    def get(self, request, *args, **kwargs):
-        token = AuthToken.get_token(self.kwargs.get('token'))
-        if token:
-            if token.is_alive():
-                self.activate_user(token)
-            token.delete()
-        return redirect('webapp:index')
+def user_activate(request):
+    token_value = request.GET.get('token')
+    try:
+        token = Token.objects.get(token=token_value)
 
-    def activate_user(self, token):
         user = token.user
         user.is_active = True
         user.save()
-        Profile.objects.create(user=user)
-        login(self.request, user)
+
+        token.delete()
+
+        login(request, user)
+
+        return redirect('webapp:index')
+    except Token.DoesNotExist:
+        return redirect('webapp:index')
 
 
-class UserDetailView(LoginRequiredMixin, DetailView):
-    model = get_user_model()
+class UserDetailView(DetailView):
+    model = User
     template_name = 'user_detail.html'
     context_object_name = 'user_obj'
-    paginate_related_by = 5
-    paginate_related_orphans = 0
-
-    def get_context_data(self, **kwargs):
-        return super().get_context_data(**kwargs)
 
 
 class UserChangeView(UserPassesTestMixin, UpdateView):
-    model = get_user_model()
-    form_class = UserChangeForm
-    template_name = 'user_change.html'
+    model = User
+    template_name = 'user_update.html'
     context_object_name = 'user_obj'
+    form_class = UserChangeForm
 
     def test_func(self):
-        return self.request.user == self.get_object()
-
-    def get_context_data(self, **kwargs):
-        if 'profile_form' not in kwargs:
-            kwargs['profile_form'] = self.get_profile_form()
-        return super().get_context_data(**kwargs)
-
-    def post(self, request, *args, **kwargs):
-        self.object = self.get_object()
-        form = self.get_form()
-        profile_form = self.get_profile_form()
-        if form.is_valid() and profile_form.is_valid():
-            return self.form_valid(form, profile_form)
-        else:
-            return self.form_invalid(form, profile_form)
-
-    def form_valid(self, form, profile_form):
-        form.save()
-        profile_form.save()
-        return HttpResponseRedirect(self.get_success_url())
-
-    def form_invalid(self, form, profile_form):
-        context = self.get_context_data(form=form, profile_form=profile_form)
-        return self.render_to_response(context)
+        return self.get_object() == self.request.user
 
     def get_success_url(self):
-        return reverse('accounts:detail', kwargs={'pk': self.object.pk})
-
-    def get_profile_form(self):
-        form_kwargs = {'instance': self.object.profile}
-        if self.request.method == 'POST':
-            form_kwargs['data'] = self.request.POST
-            form_kwargs['files'] = self.request.FILES
-        return ProfileChangeForm(**form_kwargs)
+        return reverse('accounts:user_detail', kwargs={'pk': self.object.pk})
 
 
-class UserPasswordChangeView(LoginRequiredMixin, UpdateView):
-    model = get_user_model()
+class UserPasswordChangeView(UpdateView):
+    model = User
     template_name = 'user_password_change.html'
-    form_class = PasswordChangeForm
+    form_class = UserChangePasswordForm
     context_object_name = 'user_obj'
 
-    def get_object(self, queryset=None):
-        return self.request.user
+    def text_func(self):
+        return self.get_object() == self.request.user
 
     def form_valid(self, form):
         user = form.save()
-        update_session_auth_hash(self.request, user)
+        login(self.request, user)
         return HttpResponseRedirect(self.get_success_url())
 
     def get_success_url(self):
-        return reverse('accounts:detail', kwargs={'pk': self.object.pk})
+        return reverse('accounts:login')
 
 
-class UserPasswordResetEmailView(FormView):
-    form_class = PasswordResetEmailForm
-    template_name = 'password_reset_email.html'
-    success_url = reverse_lazy('webapp:index')
-
-    def form_valid(self, form):
-        form.send_email()
-        return super().form_valid(form)
-
-
-class UserPasswordResetView(UpdateView):
+class ProfilesListView(ListView):
+    template_name = 'profiles.html'
+    context_object_name = 'profiles'
     model = User
-    form_class = PasswordResetForm
-    template_name = 'password_reset.html'
-    success_url = reverse_lazy('accounts:login')
-
-    def get_object(self, queryset=None):
-        token = self.get_token()
-        if token and token.is_alive():
-            return token.user
-        raise Http404('Ссылка не существует или её срок действия истёк')
-
-    def form_valid(self, form):
-        token = self.get_token()
-        token.delete()
-        return super().form_valid(form)
-
-    def get_token(self):
-        return AuthToken.get_token(self.kwargs.get('token'))
-
-
-class LoginViewSession(LoginView):
-    def form_valid(self, form):
-        user = User.objects.get(username=form.cleaned_data['username'])
-        self.request.session['_auth_user_id'] = user.pk
-        session_auth_hash = ''
-        if hasattr(form.get_user(), 'get_session_auth_hash'):
-            session_auth_hash = form.get_user().get_session_auth_hash()
-        self.request.session['_auth_user_hash'] = session_auth_hash
-        return super().form_valid(form)
+    paginate_by = 10
+    paginate_orphans = 1

@@ -1,32 +1,16 @@
-from django.urls import path, include
+from django.urls import path
 
-from webapp.views import *
-
-
-app_name = 'webapp'
-
+from webapp.views.__init__ import *
 
 urlpatterns = [
     path('', IndexView.as_view(), name='index'),
-
-    path('product/', include([
-        path('add/', ProductCreateView.as_view(), name='product_create'),
-        path('<int:pk>/', include([
-            path('', ProductView.as_view(), name='product_view'),
-            path('update/', ProductUpdateView.as_view(), name='product_update'),
-            path('delete/', ProductDeleteView.as_view(), name='product_delete'),
-            path('add-to-cart/', CartAddView.as_view(), name='product_add_to_cart'),
-        ])),
-    ])),
-
-    path('cart/', include([
-        path('', CartView.as_view(), name='cart_view'),
-        path('<int:pk>/', include([
-            path('delete/', CartDeleteView.as_view(), name='cart_delete'),
-            path('delete-one/', CartDeleteOneView.as_view(), name='cart_delete_one'),
-        ])),
-    ])),
-
-    path('order/create/', OrderCreateView.as_view(), name='order_create'),
-    path('orders/watch/', WatchOrdersView.as_view(), name='watch_orders')
+    path('product/<int:pk>/', ProductView.as_view(), name='product_view'),
+    path('product/add/', ProductCreateView.as_view(), name='product_create'),
+    path('product/<int:pk>/edit/', ProductUpdateView.as_view(), name='product_update'),
+    path('product/<int:pk>/delete/', ProductDeleteView.as_view(), name='product_delete'),
+    path('product/<int:pk>/add-review/', ReviewForProductCreateView.as_view(), name='product_review_create'),
+    path('review/<int:pk>/edit/', ReviewUpdateView.as_view(), name='review_update'),
+    path('review/<int:pk>/delete/', ReviewDeleteView.as_view(), name='review_delete'),
 ]
+
+app_name = 'webapp'

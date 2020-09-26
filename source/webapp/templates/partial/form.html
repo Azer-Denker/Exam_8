@@ -1,14 +1,22 @@
-<form action="{{ action_url }}" method="{{ form_method }}">
-    {% csrf_token %}
+{% csrf_token %}
 
-    {% for error in form.non_field_errors %}
-        <p class="error">{{ error }}</p>
-    {% endfor %}
+{#{% form.as_p %} вместо всего, вариант для теста#}
 
-    {% for field in form %}
-        {% include 'partial/form_field.html' %}
-    {% endfor %}
+{% for error in form.non_field_errors %}
+   <p class="form-error">{{ error }}</p>
+{% endfor %}
 
+{% for field in form %}
+    <label for="{{ field.id_for_label }}">{{ field.label }}*</label><br/>
+    {% if field.errors %}
+        {{ field }}
+    {% else %}
+        {{ field }}
+    {% endif %}
     <br/>
-    <input type="submit" value="{{ button_text|default:"Submit" }}"/>
-</form>
+{% endfor %}
+<br/>
+
+
+<input type="submit" value="{{ button_text}}"/>
+

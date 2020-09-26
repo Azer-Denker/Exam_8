@@ -1,40 +1,30 @@
 from django.contrib.auth.mixins import PermissionRequiredMixin
-from django.views.generic import DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse, reverse_lazy
+from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 
-from .base_views import SearchView
-
-from webapp.models import Product
 from webapp.forms import ProductForm
+from webapp.models import Product
 
 
-class IndexView(SearchView):
-    model = Product
+class IndexView(ListView):
     template_name = 'product/index.html'
-    ordering = ['category', 'name']
-    search_fields = ['name__icontains']
-    paginate_by = 5
     context_object_name = 'products'
-
-    def get_queryset(self):
-        return super().get_queryset().filter(amount__gt=0)
+    model = Product
+    ordering = 'name'
 
 
 class ProductView(DetailView):
+    template_name = 'product/product.html'
+    pk_url_kwarg = 'pk'
     model = Product
-    template_name = 'product/product_view.html'
-
-    # чтоб товары, которых не осталось нельзя было и просмотреть
-    # это можно добавить вместо model = Product в Detail, Update и Delete View.
-    # def get_queryset(self):
-    #     return super().get_queryset().filter(amount__gt=0)
 
 
 class ProductCreateView(PermissionRequiredMixin, CreateView):
+    template_name = 'product/create.html'
     model = Product
     form_class = ProductForm
-    template_name = 'product/product_create.html'
     permission_required = 'webapp.add_product'
+    permission_denied_message = "Доступ запрещён"
 
     def get_success_url(self):
         return reverse('webapp:product_view', kwargs={'pk': self.object.pk})
@@ -42,16 +32,20 @@ class ProductCreateView(PermissionRequiredMixin, CreateView):
 
 class ProductUpdateView(PermissionRequiredMixin, UpdateView):
     model = Product
+    template_name = 'product/update.html'
     form_class = ProductForm
-    template_name = 'product/product_update.html'
+    context_object_name = 'obj'
     permission_required = 'webapp.change_product'
+    permission_denied_message = "Доступ запрещён"
 
     def get_success_url(self):
         return reverse('webapp:product_view', kwargs={'pk': self.object.pk})
 
 
 class ProductDeleteView(PermissionRequiredMixin, DeleteView):
+    template_name = 'product/delete.html'
     model = Product
-    template_name = 'product/product_delete.html'
+    context_object_name = 'obj'
     success_url = reverse_lazy('webapp:index')
     permission_required = 'webapp.delete_product'
+    permission_denied_message = "Доступ запрещён"

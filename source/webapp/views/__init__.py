@@ -1,2 +1,2 @@
-from .product_views import *
-from .order_views import *
+from webapp.views.product_views import *
+from webapp.views.review_views import *

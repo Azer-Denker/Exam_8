@@ -1,29 +1,21 @@
 from django.contrib import admin
-from .models import Product, Cart, Order, OrderProduct
+from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.models import User
+
+from accounts.models import Profile
+from webapp.models import Product, Review
 
 
-class ProductAdmin(admin.ModelAdmin):
-    list_filter = ('category',)
-    list_display = ('pk', 'name', 'amount', 'price')
-    list_display_links = ('pk', 'name')
-    search_fields = ('name',)
+class ProfileInline(admin.StackedInline):
+    model = Profile
+    fields = ['avatar', 'about', 'github_profile']
 
 
-# Бонус
-class OrderProductAdmin(admin.TabularInline):
-    model = OrderProduct
-    fields = ('product', 'qty')
-    extra = 0
+class ProfileAdmin(UserAdmin):
+    inlines = [ProfileInline]
 
 
-# Бонус
-class OrderAdmin(admin.ModelAdmin):
-    list_display = ('pk', 'name', 'phone', 'created_at')
-    list_display_links = ('pk', 'name')
-    ordering = ('-created_at',)
-    inlines = (OrderProductAdmin,)
-
-
-admin.site.register(Product, ProductAdmin)
-admin.site.register(Cart)
-admin.site.register(Order, OrderAdmin)
+admin.site.register(Product)
+admin.site.register(Review)
+admin.site.unregister(User)
+admin.site.register(User, ProfileAdmin)
